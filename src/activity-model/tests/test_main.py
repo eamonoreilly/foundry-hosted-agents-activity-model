@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
+from starlette.testclient import TestClient
 
 
 MODULE_PATH = Path(__file__).parents[1] / "main.py"
@@ -11,6 +12,28 @@ SPEC = importlib.util.spec_from_file_location("activity_model", MODULE_PATH)
 sample = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = sample
 SPEC.loader.exec_module(sample)
+
+
+class ActivityRouteTests(unittest.TestCase):
+    def test_supports_canonical_and_playground_message_routes(self):
+        activity = {
+            "type": "message",
+            "channelId": "emulator",
+            "serviceUrl": "http://localhost",
+            "from": {"id": "user-1", "name": "Local user"},
+            "recipient": {"id": "activity-model", "name": "Activity model"},
+            "conversation": {"id": "route-test"},
+            "deliveryMode": "expectReplies",
+            "text": " ",
+        }
+
+        with TestClient(sample.host) as client:
+            canonical = client.post("/activity/messages", json=activity)
+            playground = client.post("/api/messages", json=activity)
+
+        self.assertEqual(canonical.status_code, 200, canonical.text)
+        self.assertEqual(playground.status_code, 200, playground.text)
+        self.assertEqual(playground.json(), canonical.json())
 
 
 class ConversationMappingTests(unittest.IsolatedAsyncioTestCase):

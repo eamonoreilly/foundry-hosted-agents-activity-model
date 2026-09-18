@@ -166,7 +166,7 @@ Copy-Item .env.example .env
 
 Set `FOUNDRY_PROJECT_ENDPOINT` and `AZURE_AI_MODEL_DEPLOYMENT_NAME` in `.env`, then sign in with `az login`. Open the repository root and press **F5** to debug the Activity host on `http://localhost:8088`.
 
-Activity agents use Teams or an Activity-compatible client rather than the Responses Agent Inspector. Use [local.http](local.http) for the two-turn protocol probe, or use M365 Agents Playground for interactive channel testing.
+Activity agents use Teams or an Activity-compatible client rather than the Responses Agent Inspector. Use [local.http](local.http) for the two-turn protocol probe, or run `azd ai agent run` to open M365 Agents Playground for interactive channel testing. The canonical Activity endpoint is `/activity/messages`; the host also maps the Playground's `/api/messages` requests to the same handler.
 
 The debug task uses `uv run --frozen --project src/activity-model`, so it selects the sample's virtual environment consistently on Windows, macOS, and Linux.
 

@@ -10,6 +10,7 @@ from azure.ai.projects.aio import AIProjectClient
 from azure.identity.aio import DefaultAzureCredential
 from openai import NotFoundError
 from opentelemetry.trace import format_trace_id, get_current_span
+from starlette.routing import Route
 
 
 logging.basicConfig(
@@ -21,7 +22,22 @@ logger = logging.getLogger("activity-model")
 MODEL_CONVERSATION_STATE_KEY = "modelConversationId"
 GENERIC_ERROR_MESSAGE = "Sorry, something went wrong. Please try again."
 
-host = ActivityAgentServerHost()
+
+class PlaygroundCompatibleActivityHost(ActivityAgentServerHost):
+    def _build_activity_routes(self) -> list[Route]:
+        routes = super()._build_activity_routes()
+        routes.append(
+            Route(
+                "/api/messages",
+                self._create_activity_endpoint,
+                methods=["POST"],
+                name="api_messages",
+            )
+        )
+        return routes
+
+
+host = PlaygroundCompatibleActivityHost()
 app = host.agent_app
 
 
