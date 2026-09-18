@@ -1,0 +1,32 @@
+@host = http://localhost:8088
+@conversationId = activity-model-local
+
+### First turn: store a fact
+POST {{host}}/activity/messages
+Content-Type: application/json
+
+{
+  "type": "message",
+  "channelId": "emulator",
+  "serviceUrl": "http://localhost",
+  "from": { "id": "user-1", "name": "Local user" },
+  "recipient": { "id": "activity-model", "name": "Activity model" },
+  "conversation": { "id": "{{conversationId}}" },
+  "deliveryMode": "expectReplies",
+  "text": "Remember that my verification code is CEDAR-842. Reply only SAVED."
+}
+
+### Second turn: reuse the same Activity and Responses conversations
+POST {{host}}/activity/messages
+Content-Type: application/json
+
+{
+  "type": "message",
+  "channelId": "emulator",
+  "serviceUrl": "http://localhost",
+  "from": { "id": "user-1", "name": "Local user" },
+  "recipient": { "id": "activity-model", "name": "Activity model" },
+  "conversation": { "id": "{{conversationId}}" },
+  "deliveryMode": "expectReplies",
+  "text": "What is my verification code? Reply only with the code."
+}

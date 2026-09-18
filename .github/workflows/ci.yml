@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      ENABLE_INSTRUMENTATION: "false"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.7"
+          enable-cache: true
+
+      - name: Verify lockfiles
+        run: uv lock --check --project src/activity-model
+
+      - name: Install locked dependencies
+        run: uv sync --frozen --project src/activity-model
+
+      - name: Compile Python
+        run: uv run --frozen --project src/activity-model python -m compileall -q src/activity-model
+
+      - name: Run tests
+        run: uv run --frozen --project src/activity-model python -m unittest discover -s src/activity-model/tests -v
+
+      - name: Validate repository configuration
+        shell: pwsh
+        run: |
+          Get-Content .vscode/launch.json -Raw | ConvertFrom-Json | Out-Null
+          Get-Content .vscode/tasks.json -Raw | ConvertFrom-Json | Out-Null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path scripts/Stop-StaleAgentSessions.ps1),
+            [ref] $null,
+            [ref] $errors
+          ) | Out-Null
+          if ($errors) { throw ($errors | Out-String) }
+
+      - name: Verify generated artifacts are excluded
+        run: |
+          git check-ignore src/activity-model/.env
+          git check-ignore src/activity-model/appPackage.zip
+          git check-ignore src/activity-model/.appPackage.zip.azd-generated
+          git check-ignore .foundry/validation/report.json
