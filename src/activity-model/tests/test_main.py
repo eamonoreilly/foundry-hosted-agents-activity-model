@@ -1,6 +1,7 @@
 import importlib.util
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,6 +14,51 @@ SPEC = importlib.util.spec_from_file_location("activity_model", MODULE_PATH)
 sample = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = sample
 SPEC.loader.exec_module(sample)
+
+
+class LocalEnvironmentTests(unittest.TestCase):
+    def test_uses_env_file_next_to_main(self):
+        with patch.object(sample, "load_dotenv") as dotenv_loader:
+            sample.load_local_environment()
+
+        dotenv_loader.assert_called_once_with(
+            dotenv_path=MODULE_PATH.with_name(".env"),
+            override=False,
+        )
+
+    def test_loads_values_from_env_file(self):
+        with tempfile.TemporaryDirectory() as temp_directory:
+            env_file = Path(temp_directory) / ".env"
+            env_file.write_text(
+                "ACTIVITY_MODEL_TEST_VALUE=from-file\n",
+                encoding="utf-8",
+            )
+
+            with patch.dict(os.environ, {}, clear=True):
+                sample.load_local_environment(env_file)
+                self.assertEqual(
+                    os.environ["ACTIVITY_MODEL_TEST_VALUE"],
+                    "from-file",
+                )
+
+    def test_does_not_override_process_environment(self):
+        with tempfile.TemporaryDirectory() as temp_directory:
+            env_file = Path(temp_directory) / ".env"
+            env_file.write_text(
+                "ACTIVITY_MODEL_TEST_VALUE=from-file\n",
+                encoding="utf-8",
+            )
+
+            with patch.dict(
+                os.environ,
+                {"ACTIVITY_MODEL_TEST_VALUE": "from-process"},
+                clear=True,
+            ):
+                sample.load_local_environment(env_file)
+                self.assertEqual(
+                    os.environ["ACTIVITY_MODEL_TEST_VALUE"],
+                    "from-process",
+                )
 
 
 class TelemetryConfigurationTests(unittest.TestCase):

@@ -4,11 +4,13 @@ import logging
 import os
 import uuid
 from collections.abc import Callable
+from pathlib import Path
 
 from azure.ai.agentserver.activity import ActivityAgentServerHost
 from azure.ai.projects.aio import AIProjectClient
 from azure.ai.projects.telemetry import AIProjectInstrumentor
 from azure.identity.aio import DefaultAzureCredential
+from dotenv import load_dotenv
 from openai import NotFoundError
 from opentelemetry.trace import format_trace_id, get_current_span
 from starlette.routing import Route
@@ -22,6 +24,14 @@ logger = logging.getLogger("activity-model")
 
 MODEL_CONVERSATION_STATE_KEY = "modelConversationId"
 GENERIC_ERROR_MESSAGE = "Sorry, something went wrong. Please try again."
+
+
+def load_local_environment(env_file: Path | None = None) -> None:
+    """Load local settings without overriding the process environment."""
+    load_dotenv(
+        dotenv_path=env_file or Path(__file__).with_name(".env"),
+        override=False,
+    )
 
 
 def configure_model_telemetry() -> None:
@@ -49,6 +59,7 @@ class PlaygroundCompatibleActivityHost(ActivityAgentServerHost):
         return routes
 
 
+load_local_environment()
 host = PlaygroundCompatibleActivityHost()
 configure_model_telemetry()
 app = host.agent_app
