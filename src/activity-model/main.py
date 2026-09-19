@@ -7,6 +7,7 @@ from collections.abc import Callable
 
 from azure.ai.agentserver.activity import ActivityAgentServerHost
 from azure.ai.projects.aio import AIProjectClient
+from azure.ai.projects.telemetry import AIProjectInstrumentor
 from azure.identity.aio import DefaultAzureCredential
 from openai import NotFoundError
 from opentelemetry.trace import format_trace_id, get_current_span
@@ -21,6 +22,17 @@ logger = logging.getLogger("activity-model")
 
 MODEL_CONVERSATION_STATE_KEY = "modelConversationId"
 GENERIC_ERROR_MESSAGE = "Sorry, something went wrong. Please try again."
+
+
+def configure_model_telemetry() -> None:
+    """Enable semantic model spans with explicit content-recording consent."""
+    # Keep this false unless prompt and response capture is explicitly approved.
+    enable_content_recording = (
+        os.getenv("ENABLE_SENSITIVE_DATA", "false").strip().lower() == "true"
+    )
+    AIProjectInstrumentor().instrument(
+        enable_content_recording=enable_content_recording
+    )
 
 
 class PlaygroundCompatibleActivityHost(ActivityAgentServerHost):
@@ -38,6 +50,7 @@ class PlaygroundCompatibleActivityHost(ActivityAgentServerHost):
 
 
 host = PlaygroundCompatibleActivityHost()
+configure_model_telemetry()
 app = host.agent_app
 
 

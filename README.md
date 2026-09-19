@@ -198,11 +198,24 @@ The expected replies are `SAVED` and `CEDAR-842`. A new Teams conversation creat
 - The Foundry project Responses service stores the transcript.
 - The hosted agent uses its dedicated managed identity.
 - The runtime identity accesses the same Foundry project named by `FOUNDRY_PROJECT_ENDPOINT`.
-- Model prompts and outputs are not enabled as sensitive telemetry.
+- Semantic model telemetry is enabled, but prompt and response text is excluded by default.
 
 ## Observability and Error Diagnostics
 
 `ENABLE_INSTRUMENTATION=true` enables the hosting runtime's OpenTelemetry instrumentation. It does not, by itself, create an Application Insights resource or configure an exporter.
+
+The sample also enables the Azure AI Projects GenAI tracing preview and calls `AIProjectInstrumentor` after the Activity host configures OpenTelemetry. This adds a semantic `chat <model>` span for Responses API calls. In Application Insights, the span is available in `dependencies`, and its model-message fields are also exposed through the case-sensitive `genAIContent` projection.
+
+Prompt and response text can contain personal, confidential, or regulated data. The sample therefore passes `ENABLE_SENSITIVE_DATA` to `enable_content_recording` and defaults it to `false`. With this production-safe default, telemetry includes role and content-type structure but omits the text itself. Keep it set to `false` in production unless content capture has been explicitly approved under your privacy, security, retention, and access-control policies.
+
+To include prompt and response text for a controlled development environment, opt in before deployment:
+
+```powershell
+azd env set ENABLE_SENSITIVE_DATA true
+azd deploy --no-prompt
+```
+
+Set it back to `false` and redeploy to stop capturing content. This setting applies to sensitive telemetry generally, not only model messages.
 
 At the time this sample was validated, `microsoft.foundry` source-code deployment did not provision or link Application Insights for the bicepless path. Use `azd ai agent monitor` and the hosted-agent logs for diagnostics unless your project has a verified telemetry destination. The Application Insights queries below apply only when telemetry export is separately configured and the operation is present there.
 

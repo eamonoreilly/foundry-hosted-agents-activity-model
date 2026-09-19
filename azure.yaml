@@ -52,8 +52,9 @@ services:
         - type: BotServiceRbac
     env:
       AZURE_AI_MODEL_DEPLOYMENT_NAME: ${AZURE_AI_MODEL_DEPLOYMENT_NAME=gpt-5.4-mini}
+      AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING: 'true'
       ENABLE_INSTRUMENTATION: 'true'
-      ENABLE_SENSITIVE_DATA: 'false'
+      ENABLE_SENSITIVE_DATA: ${ENABLE_SENSITIVE_DATA=false}
     container:
       resources:
         cpu: '0.5'

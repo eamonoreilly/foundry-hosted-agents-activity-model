@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -12,6 +13,46 @@ SPEC = importlib.util.spec_from_file_location("activity_model", MODULE_PATH)
 sample = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = sample
 SPEC.loader.exec_module(sample)
+
+
+class TelemetryConfigurationTests(unittest.TestCase):
+    def test_content_recording_is_disabled_by_default(self):
+        instrumentor = Mock()
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(
+                sample,
+                "AIProjectInstrumentor",
+                return_value=instrumentor,
+            ),
+        ):
+            sample.configure_model_telemetry()
+
+        instrumentor.instrument.assert_called_once_with(
+            enable_content_recording=False
+        )
+
+    def test_content_recording_can_be_explicitly_enabled(self):
+        instrumentor = Mock()
+
+        with (
+            patch.dict(
+                os.environ,
+                {"ENABLE_SENSITIVE_DATA": "true"},
+                clear=True,
+            ),
+            patch.object(
+                sample,
+                "AIProjectInstrumentor",
+                return_value=instrumentor,
+            ),
+        ):
+            sample.configure_model_telemetry()
+
+        instrumentor.instrument.assert_called_once_with(
+            enable_content_recording=True
+        )
 
 
 class ActivityRouteTests(unittest.TestCase):
