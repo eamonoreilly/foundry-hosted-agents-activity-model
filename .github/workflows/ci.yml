@@ -51,6 +51,17 @@ jobs:
             [ref] $errors
           ) | Out-Null
           if ($errors) { throw ($errors | Out-String) }
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path scripts/Grant-AgentProjectAccess.ps1),
+            [ref] $null,
+            [ref] $errors
+          ) | Out-Null
+          if ($errors) { throw ($errors | Out-String) }
+          ./scripts/tests/Grant-AgentProjectAccess.Tests.ps1
+
+      - name: Validate POSIX deployment helper
+        run: sh -n scripts/grant-agent-project-access.sh
 
       - name: Verify generated artifacts are excluded
         run: |

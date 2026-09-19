@@ -90,7 +90,7 @@ azd provision --no-state --no-prompt
 azd deploy --no-prompt
 ```
 
-`azd provision` creates the resource group, Foundry account, Foundry project, and `gpt-5.4-mini` deployment. `azd deploy` uploads the Python code, creates the hosted agent and its instance identity, configures its platform-managed project access, exposes Activity 2.0, and creates the Azure Bot and Teams channel. Deploy also makes a best-effort attempt to generate the Teams app package, but it does not install the app in Teams.
+`azd provision` creates the resource group, Foundry account, Foundry project, and `gpt-5.4-mini` deployment. `azd deploy` uploads the Python code, creates the hosted agent and its instance identity, grants that identity Foundry User on the project, exposes Activity 2.0, and creates the Azure Bot and Teams channel. The role-assignment hook is idempotent and requires the deploying principal to be allowed to create project-scoped role assignments. Deploy also makes a best-effort attempt to generate the Teams app package, but it does not install the app in Teams.
 
 ### Test a newly deployed version
 
@@ -238,20 +238,13 @@ If a failure occurs after model text has started streaming, the sample marks the
 
 ## Troubleshooting
 
-- `403 Forbidden` from `/openai/v1/conversations`: first rerun `azd deploy` with `azure.ai.agents` beta.16 or later. Current deployment handles the agent instance identity's project access. If the failure persists, retrieve the identity and project resource ID and grant the least-scope fallback explicitly:
+- `403 Forbidden` from `/openai/v1/conversations`: first rerun `azd deploy` with `azure.ai.agents` beta.16 or later. The `postdeploy` hook grants the agent instance identity Foundry User at the exact project scope. If the hook reports that your deploying identity cannot create role assignments, have a Foundry Project Manager, Foundry Account Owner, or Foundry Owner run it explicitly:
 
 ```powershell
-$agent = azd ai agent show --output json | ConvertFrom-Json
-$principalId = $agent.instance_identity.principal_id
-$projectId = azd env get-value AZURE_AI_PROJECT_ID
-az role assignment create `
-	--assignee-object-id $principalId `
-	--assignee-principal-type ServicePrincipal `
-	--role 53ca6127-db72-4b80-b1b0-d745d6d5456d `
-	--scope $projectId
+azd hooks run postdeploy
 ```
 
-  The role ID is `Foundry User`. RBAC can take several minutes to propagate; stop the stale hosted session before retrying so the next message uses the latest version.
+	The hook is idempotent and discovers the agent identity and project scope from the azd deployment environment. RBAC can take several minutes to propagate; stop the stale hosted session before retrying so the next message uses the latest version.
 - `404 Not Found` for a stored conversation: the sample replaces the stale project conversation once and updates the Activity state mapping.
 - Teams shows only a generic error: inspect hosted logs for the underlying project API status.
 

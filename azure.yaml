@@ -61,3 +61,12 @@ services:
 
 infra:
   provider: microsoft.foundry
+
+hooks:
+  postdeploy:
+    windows:
+      shell: pwsh
+      run: ./scripts/Grant-AgentProjectAccess.ps1
+    posix:
+      shell: sh
+      run: ./scripts/grant-agent-project-access.sh
