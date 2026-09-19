@@ -187,7 +187,7 @@ uv sync --frozen --project src/activity-model
 uv run --frozen --project src/activity-model python -m unittest discover -s src/activity-model/tests -v
 ```
 
-Runtime dependencies are declared in `src/activity-model/pyproject.toml`; local debugger support is in its `dev` dependency group. When changing dependencies, run `uv lock --project src/activity-model` and commit its `uv.lock`. GitHub Actions repeats the frozen install, Python compilation, tests, configuration parsing, and generated-artifact checks.
+Runtime dependencies are declared in `src/activity-model/pyproject.toml`; local debugger support is in its `dev` dependency group. When changing dependencies, run `uv lock --project src/activity-model` and commit its `uv.lock`. GitHub Actions checks the lock, verifies a frozen production export, installs the frozen environment, compiles the Python source, runs the tests, parses repository configuration, and checks deployment exclusions.
 
 ## Verify Multi-Turn History
 

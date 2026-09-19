@@ -30,6 +30,9 @@ jobs:
       - name: Verify lockfiles
         run: uv lock --check --project src/activity-model
 
+      - name: Verify frozen production export
+        run: uv export --frozen --no-dev --no-emit-project --format requirements-txt --project src/activity-model --output-file "$RUNNER_TEMP/requirements.txt"
+
       - name: Install locked dependencies
         run: uv sync --frozen --project src/activity-model
 

@@ -7,7 +7,8 @@ This repository is a Microsoft Foundry hosted Activity agent for Microsoft Teams
 - `azure.yaml` defines the Foundry project, model deployment, hosted agent, Activity 2.0 endpoint, and direct code deployment.
 - `src/activity-model/main.py` contains the Activity handler and native async Foundry SDK calls.
 - `src/activity-model/pyproject.toml` and `uv.lock` are the authoritative Python dependency artifacts.
-- `scripts/Stop-StaleAgentSessions.ps1` stops sessions pinned to older agent versions after deployment. No repository script runs during provision or deploy; the `azure.ai.agents` extension owns the hosted identity's platform-managed project access.
+- `scripts/Grant-AgentProjectAccess.ps1` and its POSIX counterpart run from the `postdeploy` hook to grant the agent instance identity Foundry User at project scope.
+- `scripts/Stop-StaleAgentSessions.ps1` stops sessions pinned to older agent versions after deployment.
 - `local.http` contains a deterministic two-turn Activity probe.
 - `.github/workflows/ci.yml` is the release gate for locks, compilation, tests, configuration syntax, and deployment exclusions.
 
