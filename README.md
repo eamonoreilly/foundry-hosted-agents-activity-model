@@ -174,7 +174,7 @@ To run the host directly from the source directory:
 uv run --frozen python main.py
 ```
 
-Activity agents use Teams or an Activity-compatible client rather than the Responses Agent Inspector. Use [local.http](local.http) for the two-turn protocol probe, or run `azd ai agent run` to open M365 Agents Playground for interactive channel testing. The canonical Activity endpoint is `/activity/messages`; the host also maps the Playground's `/api/messages` requests to the same handler.
+Activity agents use Teams or an Activity-compatible client rather than the Responses Agent Inspector. Use [local.http](local.http) for the two-turn protocol probe, or run `azd ai agent run` to open M365 Agents Playground for interactive channel testing. The native Activity endpoint is `/activity/messages`; use an up-to-date `azd` and `azure.ai.agents` extension so Playground targets it.
 
 The debug task uses `uv run --frozen --project src/activity-model`, so it selects the sample's virtual environment consistently on Windows, macOS, and Linux.
 

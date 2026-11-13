@@ -102,7 +102,7 @@ class TelemetryConfigurationTests(unittest.TestCase):
 
 
 class ActivityRouteTests(unittest.TestCase):
-    def test_supports_canonical_and_playground_message_routes(self):
+    def test_handles_message_on_canonical_activity_route(self):
         activity = {
             "type": "message",
             "channelId": "emulator",
@@ -111,16 +111,27 @@ class ActivityRouteTests(unittest.TestCase):
             "recipient": {"id": "activity-model", "name": "Activity model"},
             "conversation": {"id": "route-test"},
             "deliveryMode": "expectReplies",
-            "text": " ",
+            "text": "Hello",
         }
 
-        with TestClient(sample.host) as client:
-            canonical = client.post("/activity/messages", json=activity)
-            playground = client.post("/api/messages", json=activity)
+        async def respond_with_text(_prompt, _state, on_text_delta):
+            on_text_delta("Hello back")
+            return "Hello back"
 
-        self.assertEqual(canonical.status_code, 200, canonical.text)
-        self.assertEqual(playground.status_code, 200, playground.text)
-        self.assertEqual(playground.json(), canonical.json())
+        with (
+            patch.object(
+                sample,
+                "respond_with_history",
+                side_effect=respond_with_text,
+            ) as respond,
+            TestClient(sample.host) as client,
+        ):
+            response = client.post("/activity/messages", json=activity)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["activities"][0]["text"], "Hello back")
+        respond.assert_awaited_once()
+        self.assertEqual(respond.await_args.args[0], "Hello")
 
 
 class ConversationMappingTests(unittest.IsolatedAsyncioTestCase):

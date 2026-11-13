@@ -13,7 +13,6 @@ from azure.identity.aio import DefaultAzureCredential
 from dotenv import load_dotenv
 from openai import NotFoundError
 from opentelemetry.trace import format_trace_id, get_current_span
-from starlette.routing import Route
 
 
 logging.basicConfig(
@@ -45,22 +44,8 @@ def configure_model_telemetry() -> None:
     )
 
 
-class PlaygroundCompatibleActivityHost(ActivityAgentServerHost):
-    def _build_activity_routes(self) -> list[Route]:
-        routes = super()._build_activity_routes()
-        routes.append(
-            Route(
-                "/api/messages",
-                self._create_activity_endpoint,
-                methods=["POST"],
-                name="api_messages",
-            )
-        )
-        return routes
-
-
 load_local_environment()
-host = PlaygroundCompatibleActivityHost()
+host = ActivityAgentServerHost()
 configure_model_telemetry()
 app = host.agent_app
 
