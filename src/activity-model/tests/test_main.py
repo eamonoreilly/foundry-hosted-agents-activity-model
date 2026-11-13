@@ -133,6 +133,46 @@ class ActivityRouteTests(unittest.TestCase):
         respond.assert_awaited_once()
         self.assertEqual(respond.await_args.args[0], "Hello")
 
+    def test_welcomes_only_when_agent_is_added_without_calling_model(self):
+        cases = [
+            ("agent added", {"membersAdded": [{"id": "activity-model"}]}, 1),
+            (
+                "agent and user added",
+                {"membersAdded": [{"id": "user-1"}, {"id": "activity-model"}]},
+                1,
+            ),
+            ("user added", {"membersAdded": [{"id": "user-2"}]}, 0),
+            ("no members added", {"membersAdded": []}, 0),
+            ("agent removed", {"membersRemoved": [{"id": "activity-model"}]}, 0),
+        ]
+
+        with (
+            patch.object(sample, "respond_with_history", AsyncMock()) as respond,
+            TestClient(sample.host) as client,
+        ):
+            for name, update, expected_count in cases:
+                with self.subTest(name=name):
+                    activity = {
+                        "type": "conversationUpdate",
+                        "channelId": "emulator",
+                        "serviceUrl": "http://localhost",
+                        "from": {"id": "user-1", "name": "Local user"},
+                        "recipient": {"id": "activity-model", "name": "Activity model"},
+                        "conversation": {"id": f"welcome-{name}"},
+                        "deliveryMode": "expectReplies",
+                        **update,
+                    }
+                    response = client.post("/activity/messages", json=activity)
+
+                    self.assertEqual(response.status_code, 200, response.text)
+                    replies = response.json()["activities"]
+                    self.assertEqual(len(replies), expected_count)
+                    if expected_count:
+                        self.assertIn("Ask me a question", replies[0]["text"])
+                        self.assertIn("@mention me", replies[0]["text"])
+
+        respond.assert_not_awaited()
+
 
 class ConversationMappingTests(unittest.IsolatedAsyncioTestCase):
     async def test_first_turn_creates_and_stores_project_conversation(self):

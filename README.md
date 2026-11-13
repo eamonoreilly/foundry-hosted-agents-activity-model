@@ -178,6 +178,16 @@ Activity agents use Teams or an Activity-compatible client rather than the Respo
 
 The debug task uses `uv run --frozen --project src/activity-model`, so it selects the sample's virtual environment consistently on Windows, macOS, and Linux.
 
+### Verify the welcome message
+
+The agent sends a fixed welcome when a `conversationUpdate` activity's `membersAdded` list includes the agent itself (`recipient.id`). It sends one welcome for that event, even when both the user and agent are listed. Adding other users or removing members does not trigger a welcome. The greeting does not call the model or create a Responses conversation.
+
+1. Restart the local host, or press **F5** to start it.
+2. Send the **Welcome: simulate adding the agent** request in [local.http](local.http). The response's `activities` array should contain the welcome message.
+3. In M365 Agents Playground, use **Mock an Activity** to send a `conversationUpdate` with `membersAdded` containing the same ID as `recipient.id` to test the event interactively.
+
+For a deployed Teams app, deploy the updated code and remove and re-add the app in the conversation to trigger the agent-added event. Opening an existing chat does not replay it. Follow [Test a newly deployed version](#test-a-newly-deployed-version) if the chat is still using an older hosted session.
+
 ## Develop and Test
 
 Install and test only from the committed lockfiles:

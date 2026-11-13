@@ -23,6 +23,10 @@ logger = logging.getLogger("activity-model")
 
 MODEL_CONVERSATION_STATE_KEY = "modelConversationId"
 GENERIC_ERROR_MESSAGE = "Sorry, something went wrong. Please try again."
+WELCOME_MESSAGE = (
+    "Hello! I'm your Foundry Activity agent. Ask me a question to get started. "
+    "In group chats and channels, @mention me so I receive your message."
+)
 
 
 def load_local_environment(env_file: Path | None = None) -> None:
@@ -169,6 +173,16 @@ async def respond_with_history(
             conversation_id,
         )
         return await call_model(prompt, conversation_id, on_text_delta)
+
+
+@app.conversation_update("membersAdded")
+async def on_members_added(context, state):
+    """Welcome the conversation when the agent itself is added."""
+    if any(
+        member.id == context.activity.recipient.id
+        for member in context.activity.members_added
+    ):
+        await context.send_activity(WELCOME_MESSAGE)
 
 
 @app.activity("message")
