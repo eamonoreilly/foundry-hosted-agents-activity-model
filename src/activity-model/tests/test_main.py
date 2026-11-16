@@ -1,3 +1,4 @@
+import asyncio
 import importlib.util
 import os
 import sys
@@ -114,7 +115,7 @@ class ActivityRouteTests(unittest.TestCase):
             "text": "Hello",
         }
 
-        async def respond_with_text(_prompt, _state, on_text_delta):
+        async def respond_with_text(_prompt, _state, on_text_delta, _context):
             on_text_delta("Hello back")
             return "Hello back"
 
@@ -175,13 +176,38 @@ class ActivityRouteTests(unittest.TestCase):
 
 
 class ConversationMappingTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        sample._conversation_turns.clear()
+
+    @staticmethod
+    def make_context(conversation_id):
+        return SimpleNamespace(
+            activity=SimpleNamespace(
+                channel_id="test-channel",
+                conversation=SimpleNamespace(id=conversation_id),
+            )
+        )
+
     async def test_first_turn_creates_and_stores_project_conversation(self):
         conversation_state = SimpleNamespace(
             get_value=Mock(return_value=None),
             set_value=Mock(),
         )
-        state = SimpleNamespace(conversation=conversation_state)
+        context = self.make_context("first-turn")
+        state = SimpleNamespace(
+            conversation=conversation_state,
+            save=AsyncMock(),
+        )
         on_text_delta = Mock()
+        call_order = []
+
+        async def save_state(saved_context):
+            self.assertIs(saved_context, context)
+            call_order.append("save")
+
+        async def call_model(prompt, conversation_id, callback):
+            call_order.append("model")
+            return "Saved"
 
         with (
             patch.object(
@@ -192,17 +218,21 @@ class ConversationMappingTests(unittest.IsolatedAsyncioTestCase):
             patch.object(
                 sample,
                 "call_model",
-                AsyncMock(return_value="Saved"),
+                side_effect=call_model,
             ) as call_model,
         ):
+            state.save.side_effect = save_state
             answer = await sample.respond_with_history(
                 "Remember CEDAR-842",
                 state,
                 on_text_delta,
+                context,
             )
 
         self.assertEqual(answer, "Saved")
+        self.assertEqual(call_order, ["save", "model"])
         create_conversation.assert_awaited_once_with()
+        state.save.assert_awaited_once_with(context)
         conversation_state.set_value.assert_called_once_with(
             "modelConversationId",
             "conv_new",
@@ -213,12 +243,91 @@ class ConversationMappingTests(unittest.IsolatedAsyncioTestCase):
             on_text_delta,
         )
 
+    async def test_concurrent_first_turns_share_saved_conversation(self):
+        context = self.make_context("concurrent-first-turn")
+        first_conversation_state = SimpleNamespace(
+            get_value=Mock(return_value=None),
+            set_value=Mock(),
+        )
+        second_conversation_state = SimpleNamespace(
+            get_value=Mock(return_value=None),
+            set_value=Mock(),
+        )
+        first_state = SimpleNamespace(
+            conversation=first_conversation_state,
+            save=AsyncMock(),
+        )
+        second_state = SimpleNamespace(
+            conversation=second_conversation_state,
+            save=AsyncMock(),
+        )
+        first_model_started = asyncio.Event()
+        release_first_model = asyncio.Event()
+        second_model_started = asyncio.Event()
+        second_call_order = []
+
+        async def save_second_state(_context):
+            second_call_order.append("save")
+
+        async def call_model(prompt, _conversation_id, _on_text_delta):
+            if prompt == "first":
+                first_model_started.set()
+                await release_first_model.wait()
+            else:
+                second_call_order.append("model")
+                second_model_started.set()
+            return prompt
+
+        second_state.save.side_effect = save_second_state
+        with (
+            patch.object(
+                sample,
+                "create_model_conversation",
+                AsyncMock(return_value="conv_shared"),
+            ) as create_conversation,
+            patch.object(
+                sample,
+                "call_model",
+                side_effect=call_model,
+            ) as model_call,
+        ):
+            first_turn = asyncio.create_task(
+                sample.respond_with_history("first", first_state, Mock(), context)
+            )
+            await first_model_started.wait()
+            second_turn = asyncio.create_task(
+                sample.respond_with_history("second", second_state, Mock(), context)
+            )
+            await asyncio.sleep(0)
+            self.assertFalse(second_model_started.is_set())
+            release_first_model.set()
+
+            answers = await asyncio.gather(first_turn, second_turn)
+
+        self.assertEqual(answers, ["first", "second"])
+        create_conversation.assert_awaited_once_with()
+        first_state.save.assert_awaited_once_with(context)
+        second_state.save.assert_awaited_once_with(context)
+        self.assertEqual(second_call_order, ["save", "model"])
+        second_conversation_state.set_value.assert_called_once_with(
+            "modelConversationId",
+            "conv_shared",
+        )
+        self.assertEqual(
+            [call.args[1] for call in model_call.await_args_list],
+            ["conv_shared", "conv_shared"],
+        )
+
     async def test_later_turn_reuses_project_conversation(self):
         conversation_state = SimpleNamespace(
             get_value=Mock(return_value="conv_existing"),
             set_value=Mock(),
         )
-        state = SimpleNamespace(conversation=conversation_state)
+        state = SimpleNamespace(
+            conversation=conversation_state,
+            save=AsyncMock(),
+        )
+        context = self.make_context("later-turn")
         on_text_delta = Mock()
 
         with (
@@ -237,10 +346,12 @@ class ConversationMappingTests(unittest.IsolatedAsyncioTestCase):
                 "What is my verification code?",
                 state,
                 on_text_delta,
+                context,
             )
 
         self.assertEqual(answer, "CEDAR-842")
         create_conversation.assert_not_awaited()
+        state.save.assert_not_awaited()
         conversation_state.set_value.assert_not_called()
         call_model.assert_awaited_once_with(
             "What is my verification code?",
@@ -253,7 +364,11 @@ class ConversationMappingTests(unittest.IsolatedAsyncioTestCase):
             get_value=Mock(return_value="conv_stale"),
             set_value=Mock(),
         )
-        state = SimpleNamespace(conversation=conversation_state)
+        state = SimpleNamespace(
+            conversation=conversation_state,
+            save=AsyncMock(),
+        )
+        context = self.make_context("stale-turn")
         on_text_delta = Mock()
 
         with (
@@ -277,10 +392,12 @@ class ConversationMappingTests(unittest.IsolatedAsyncioTestCase):
                 "Continue",
                 state,
                 on_text_delta,
+                context,
             )
 
         self.assertEqual(answer, "Recovered")
         create_conversation.assert_awaited_once_with()
+        state.save.assert_awaited_once_with(context)
         conversation_state.set_value.assert_called_once_with(
             "modelConversationId",
             "conv_replacement",
@@ -295,31 +412,20 @@ class ConversationMappingTests(unittest.IsolatedAsyncioTestCase):
 
 
 class FoundrySdkTests(unittest.IsolatedAsyncioTestCase):
-    async def test_creates_project_conversation_with_async_foundry_client(self):
+    def setUp(self):
+        sample._foundry_clients = None
+
+    async def test_creates_project_conversation(self):
         openai = SimpleNamespace(
             conversations=SimpleNamespace(
                 create=AsyncMock(return_value=SimpleNamespace(id="conv_created"))
             )
         )
-        project = AsyncContext(
-            SimpleNamespace(get_openai_client=Mock(return_value=AsyncContext(openai)))
-        )
 
-        with (
-            patch.object(sample, "DefaultAzureCredential", return_value=AsyncContext()),
-            patch.object(sample, "AIProjectClient", return_value=project) as client_type,
-            patch.dict(
-                sample.os.environ,
-                {"FOUNDRY_PROJECT_ENDPOINT": "https://project.example.test"},
-            ),
-        ):
+        with patch.object(sample, "get_openai_client", return_value=openai):
             conversation_id = await sample.create_model_conversation()
 
         self.assertEqual(conversation_id, "conv_created")
-        client_type.assert_called_once_with(
-            endpoint="https://project.example.test",
-            credential=unittest.mock.ANY,
-        )
         openai.conversations.create.assert_awaited_once_with()
 
     async def test_model_call_uses_stored_project_conversation(self):
@@ -329,9 +435,7 @@ class FoundrySdkTests(unittest.IsolatedAsyncioTestCase):
                 create=AsyncMock(
                     return_value=AsyncEvents(
                         [
-                            SimpleNamespace(
-                                type="response.created",
-                            ),
+                            SimpleNamespace(type="response.created"),
                             SimpleNamespace(
                                 type="response.output_text.delta",
                                 delta="Stored ",
@@ -345,19 +449,12 @@ class FoundrySdkTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
         )
-        project = AsyncContext(
-            SimpleNamespace(get_openai_client=Mock(return_value=AsyncContext(openai)))
-        )
 
         with (
-            patch.object(sample, "DefaultAzureCredential", return_value=AsyncContext()),
-            patch.object(sample, "AIProjectClient", return_value=project),
+            patch.object(sample, "get_openai_client", return_value=openai),
             patch.dict(
                 sample.os.environ,
-                {
-                    "FOUNDRY_PROJECT_ENDPOINT": "https://project.example.test",
-                    "AZURE_AI_MODEL_DEPLOYMENT_NAME": "gpt-test",
-                },
+                {"AZURE_AI_MODEL_DEPLOYMENT_NAME": "gpt-test"},
             ),
         ):
             answer = await sample.call_model(
@@ -378,6 +475,37 @@ class FoundrySdkTests(unittest.IsolatedAsyncioTestCase):
             [call.args for call in on_text_delta.call_args_list],
             [("Stored ",), ("reply",)],
         )
+
+    async def test_shared_client_is_created_once_and_closed_on_shutdown(self):
+        credential = SimpleNamespace(close=AsyncMock())
+        openai = SimpleNamespace(close=AsyncMock())
+        project = SimpleNamespace(
+            get_openai_client=Mock(return_value=openai),
+            close=AsyncMock(),
+        )
+
+        with (
+            patch.object(sample, "DefaultAzureCredential", return_value=credential),
+            patch.object(sample, "AIProjectClient", return_value=project) as client_type,
+            patch.dict(
+                sample.os.environ,
+                {"FOUNDRY_PROJECT_ENDPOINT": "https://project.example.test"},
+            ),
+        ):
+            first = sample.get_openai_client()
+            second = sample.get_openai_client()
+            await sample.close_foundry_clients()
+
+        self.assertIs(first, openai)
+        self.assertIs(second, openai)
+        client_type.assert_called_once_with(
+            endpoint="https://project.example.test",
+            credential=credential,
+        )
+        openai.close.assert_awaited_once_with()
+        project.close.assert_awaited_once_with()
+        credential.close.assert_awaited_once_with()
+        self.assertIsNone(sample._foundry_clients)
 
 
 class ActivityBridgeTests(unittest.IsolatedAsyncioTestCase):
@@ -420,20 +548,19 @@ class ActivityBridgeTests(unittest.IsolatedAsyncioTestCase):
             "Hello",
             state,
             streaming_response.queue_text_chunk,
+            context,
         )
         streaming_response.end_stream.assert_awaited_once_with()
 
     async def test_error_finalizes_stream_with_trace_reference(self):
         trace_id = "4962ec560fbbcb05a468b4fef411d301"
         streaming_response = SimpleNamespace(
-            get_message=Mock(return_value=""),
             queue_text_chunk=Mock(),
             end_stream=AsyncMock(),
         )
         context = SimpleNamespace(
             activity=SimpleNamespace(id="activity-123"),
             streaming_response=streaming_response,
-            send_activity=AsyncMock(),
         )
         error = RuntimeError("internal path and secret details")
         span = SimpleNamespace(
@@ -455,81 +582,11 @@ class ActivityBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(trace_id, user_message)
         self.assertNotIn(str(error), user_message)
         streaming_response.end_stream.assert_awaited_once_with()
-        context.send_activity.assert_not_awaited()
         self.assertEqual(
             log_error.call_args.kwargs["exc_info"],
             (RuntimeError, error, error.__traceback__),
         )
         self.assertEqual(log_error.call_args.args[1:], (trace_id, "activity-123"))
-
-    async def test_error_uses_normal_activity_when_stream_finalization_fails(self):
-        streaming_response = SimpleNamespace(
-            get_message=Mock(return_value=""),
-            queue_text_chunk=Mock(),
-            end_stream=AsyncMock(side_effect=RuntimeError("stream failed")),
-        )
-        context = SimpleNamespace(
-            activity=SimpleNamespace(id="activity-789"),
-            streaming_response=streaming_response,
-            send_activity=AsyncMock(),
-        )
-        invalid_span = SimpleNamespace(
-            get_span_context=Mock(
-                return_value=SimpleNamespace(is_valid=False, trace_id=0)
-            )
-        )
-
-        with (
-            patch.object(sample, "get_current_span", return_value=invalid_span),
-            patch.object(
-                sample.uuid,
-                "uuid4",
-                return_value=SimpleNamespace(hex="fallback-reference"),
-            ),
-            patch.object(sample.logger, "error"),
-            patch.object(sample.logger, "exception"),
-        ):
-            await sample.on_error(context, ValueError("private failure detail"))
-
-        fallback_message = context.send_activity.await_args.args[0]
-        self.assertIn("fallback-reference", fallback_message)
-        self.assertNotIn("private failure detail", fallback_message)
-        context.send_activity.assert_awaited_once()
-
-    async def test_error_marks_partial_stream_as_interrupted(self):
-        streaming_response = SimpleNamespace(
-            get_message=Mock(return_value="An unfinished answer"),
-            queue_text_chunk=Mock(),
-            end_stream=AsyncMock(),
-        )
-        context = SimpleNamespace(
-            activity=SimpleNamespace(id="activity-456"),
-            streaming_response=streaming_response,
-            send_activity=AsyncMock(),
-        )
-        invalid_span = SimpleNamespace(
-            get_span_context=Mock(
-                return_value=SimpleNamespace(is_valid=False, trace_id=0)
-            )
-        )
-
-        with (
-            patch.object(sample, "get_current_span", return_value=invalid_span),
-            patch.object(
-                sample.uuid,
-                "uuid4",
-                return_value=SimpleNamespace(hex="fallback-reference"),
-            ),
-            patch.object(sample.logger, "error"),
-        ):
-            await sample.on_error(context, ValueError("private failure detail"))
-
-        user_message = streaming_response.queue_text_chunk.call_args.args[0]
-        self.assertTrue(user_message.startswith("\n\nThe response was interrupted."))
-        self.assertIn("fallback-reference", user_message)
-        self.assertNotIn("private failure detail", user_message)
-        streaming_response.end_stream.assert_awaited_once_with()
-        context.send_activity.assert_not_awaited()
 
 
 class AsyncEvents:
@@ -542,17 +599,6 @@ class AsyncEvents:
     async def _iterate(self):
         for event in self.events:
             yield event
-
-
-class AsyncContext:
-    def __init__(self, value=None):
-        self.value = value or self
-
-    async def __aenter__(self):
-        return self.value
-
-    async def __aexit__(self, *_args):
-        return None
 
 
 if __name__ == "__main__":

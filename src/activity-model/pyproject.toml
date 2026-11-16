@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "A Microsoft Foundry Activity agent with project-backed model history"
 requires-python = ">=3.13,<3.14"
 dependencies = [
-    "azure-ai-agentserver-activity==1.0.0b4",
+    "azure-ai-agentserver-activity==1.0.0",
     "azure-ai-projects==2.11.0",
     "azure-identity==1.27.0",
     "httpx==0.28.1",

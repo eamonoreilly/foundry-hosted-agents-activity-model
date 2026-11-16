@@ -24,6 +24,7 @@ await respond_with_history(
 	prompt,
 	state,
 	streaming_response.queue_text_chunk,
+	context,
 )
 await streaming_response.end_stream()
 ```
@@ -36,7 +37,7 @@ Teams renders the progressive updates when it delivers a normal Activity turn. T
 
 - An Azure subscription
 - Python 3.13 and [uv](https://docs.astral.sh/uv/)
-- [Azure Developer CLI](https://learn.microsoft.com/azure/developer/azure-developer-cli/install-azd) 1.27.1 or later
+- [Azure Developer CLI](https://learn.microsoft.com/azure/developer/azure-developer-cli/install-azd) 1.37.0 or later
 - [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli)
 - Permission to create the Foundry resources and role assignments used by hosted-agent deployment
 - A unique agent name before deployment because the generated Azure Bot name is global
@@ -51,7 +52,7 @@ az login
 azd auth login
 ```
 
-The manifest requires `azure.ai.agents` 1.0.0-beta.16 or later. Beta.16 includes the model-deployment-name persistence fix used by this initialization flow.
+The manifest requires `azure.ai.agents` 1.0.0-beta.23 or later for memory snapshot support.
 
 Initialize a portable copy directly from this repository:
 
@@ -87,10 +88,24 @@ Provision and deploy in separate, observable steps:
 
 ```powershell
 azd provision --no-state --no-prompt
+$env:AZD_ALPHA_ENABLE_AGENTS_MEMORY_SNAPSHOT = 'true'
 azd deploy --no-prompt
+Remove-Item Env:AZD_ALPHA_ENABLE_AGENTS_MEMORY_SNAPSHOT
 ```
 
 `azd provision` creates the resource group, Foundry account, Foundry project, and `gpt-5.4-mini` deployment. `azd deploy` uploads the Python code, creates the hosted agent and its instance identity, grants that identity Foundry User on the project, exposes Activity 2.0, and creates the Azure Bot and Teams channel. The role-assignment hook is idempotent and requires the deploying principal to be allowed to create project-scoped role assignments. Deploy also makes a best-effort attempt to generate the Teams app package, but it does not install the app in Teams.
+
+### Memory snapshots
+
+The hosted agent enables memory snapshots with `enableMemorySnapshot: true` in `azure.yaml`. The `azd` preview switch is required when deploying the agent version. Set it before `azd deploy` or `azd up`, then remove it afterward:
+
+```powershell
+$env:AZD_ALPHA_ENABLE_AGENTS_MEMORY_SNAPSHOT = 'true'
+azd deploy --no-prompt
+Remove-Item Env:AZD_ALPHA_ENABLE_AGENTS_MEMORY_SNAPSHOT
+```
+
+Foundry prepares the snapshot as part of deploying the version, before its first session request. New compute for that version, including compute restarted after idle deallocation, restores from the snapshot. A snapshot is a startup baseline, not a checkpoint: process memory and local files, including `$HOME`, don't persist across idle suspension and resumption. The sample keeps the Teams-to-Responses conversation mapping in Foundry storage. See [Enable memory snapshots for hosted agents](https://learn.microsoft.com/azure/foundry/agents/how-to/use-hosted-agent-memory-snapshots) for details.
 
 ### Test a newly deployed version
 
@@ -102,7 +117,7 @@ After deployment, stop only sessions pinned to an older version:
 .\scripts\Stop-StaleAgentSessions.ps1
 ```
 
-The helper compares the latest version from `azd ai agent show` with the version attached to every session returned by `azd ai agent sessions list`. It stops only non-stopped sessions on older versions; current-version sessions are left running. `stop` preserves the session and its filesystem volume, unlike `delete`. The next message in Teams starts or resumes compute on the latest deployed version.
+The helper compares the latest version from `azd ai agent show` with the version attached to every session returned by `azd ai agent sessions list`. It stops only non-stopped sessions on older versions; current-version sessions are left running. Unlike `delete`, `stop` preserves the session. The next message in Teams starts or resumes compute on the latest deployed version. Snapshot-enabled sessions don't preserve local files across idle suspension and resumption.
 
 Preview what would be stopped without changing anything:
 
@@ -123,7 +138,9 @@ The CLI reports a session waiting between messages as `active`, even when it is 
 To run both stages with one command after setting the environment values:
 
 ```powershell
+$env:AZD_ALPHA_ENABLE_AGENTS_MEMORY_SNAPSHOT = 'true'
 azd up --no-prompt
+Remove-Item Env:AZD_ALPHA_ENABLE_AGENTS_MEMORY_SNAPSHOT
 ```
 
 After deployment, explicitly generate the personal Teams package so a packaging failure is reported:
@@ -152,7 +169,7 @@ azd ai agent init `
 	--agent-name my-unique-activity-agent
 ```
 
-Enter the generated project folder, then run `azd deploy --no-prompt`. Provisioning is unnecessary when the project and model already exist.
+Enter the generated project folder, then deploy with the snapshot switch as shown in [Memory snapshots](#memory-snapshots). Provisioning is unnecessary when the project and model already exist.
 
 ## Option 3: VS Code
 
@@ -213,8 +230,10 @@ The expected replies are `SAVED` and `CEDAR-842`. A new Teams conversation creat
 ## State and Security
 
 - Activity/M365 state stores only `modelConversationId`.
+- Model turns are serialized per channel conversation within one process. A new or replacement conversation ID is saved before the model call, so overlapping turns can reuse it even if their state was loaded earlier. This lock does not coordinate separate agent replicas.
 - The Foundry project Responses service stores the transcript.
 - The hosted agent uses its dedicated managed identity.
+- One credential, project client, and OpenAI client are created on first use and reused for the life of the process. The host's shutdown handler closes them on graceful shutdown; a new process creates new ones.
 - The runtime identity accesses the same Foundry project named by `FOUNDRY_PROJECT_ENDPOINT`.
 - Semantic model telemetry is enabled, but prompt and response text is excluded by default.
 
@@ -265,11 +284,11 @@ union exceptions, traces
 
 The server log includes the full traceback, reference, and inbound Activity ID. The Teams response never includes exception messages, stack traces, filesystem paths, session IDs, or user identifiers. Keep that boundary during development as well: use local console output, hosted logs, or a verified telemetry destination for diagnostic detail.
 
-If a failure occurs after model text has started streaming, the sample marks the response as interrupted and finalizes the same Activity stream. This avoids leaving an unfinished streaming message in Teams.
+The error message is added to the same Activity stream and the stream is finalized, so a failure after model text has started streaming does not leave an unfinished message in Teams. If sending the error also fails, the agent only logs it.
 
 ## Troubleshooting
 
-- `403 Forbidden` from `/openai/v1/conversations`: first rerun `azd deploy` with `azure.ai.agents` beta.16 or later. The `postdeploy` hook grants the agent instance identity Foundry User at the exact project scope. If the hook reports that your deploying identity cannot create role assignments, have a Foundry Project Manager, Foundry Account Owner, or Foundry Owner run it explicitly:
+- `403 Forbidden` from `/openai/v1/conversations`: first rerun `azd deploy` with `azure.ai.agents` beta.23 or later and the [memory snapshot switch](#memory-snapshots) enabled. The `postdeploy` hook grants the agent instance identity Foundry User at the exact project scope. If the hook reports that your deploying identity cannot create role assignments, have a Foundry Project Manager, Foundry Account Owner, or Foundry Owner run it explicitly:
 
 ```powershell
 azd hooks run postdeploy
